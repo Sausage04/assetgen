@@ -8,6 +8,12 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// ✅ Add root endpoint
+app.get('/', (req, res) => {
+  res.send('🎨 AssetGen API is alive and running!');
+});
+
+// 🎨 Image generation route
 app.post('/generate', async (req, res) => {
   const { prompt } = req.body;
   try {
