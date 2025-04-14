@@ -2,6 +2,13 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import axios from 'axios';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+// Setup __dirname for ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Load environment variables
 dotenv.config();
@@ -12,7 +19,10 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Root route for checking if the server is live
+// Serve the generated image files from /public
+app.use('/public', express.static(path.join(__dirname, 'public')));
+
+// Root route
 app.get('/', (req, res) => {
   console.log('Root endpoint hit');
   res.send('🎨 AssetGen API is alive and running!');
@@ -20,29 +30,25 @@ app.get('/', (req, res) => {
 
 // 🎨 Image generation route
 app.post('/generate', async (req, res) => {
-  const { prompt, type } = req.body; // Expect prompt and type (3d or 2d)
+  const { prompt, type } = req.body;
 
-  // Log the incoming request
   console.log('Received POST request to /generate');
   console.log(`Request Body: prompt=${prompt}, type=${type}`);
 
-  // Check if the prompt and type are provided
   if (!prompt || !type) {
     console.log('Error: Prompt or type missing');
     return res.status(400).json({ error: 'Prompt and type are required' });
   }
 
   try {
-    // Log the request to OpenAI API
     console.log('Sending request to OpenAI API...');
     
-    // Send request to OpenAI's image generation API
     const response = await axios.post(
       'https://api.openai.com/v1/images/generations',
       {
         prompt,
         n: 1,
-        size: '512x512',  // Adjust this size as needed
+        size: '512x512',
         response_format: 'url',
       },
       {
@@ -51,13 +57,30 @@ app.post('/generate', async (req, res) => {
         },
       }
     );
-    
-    // Log OpenAI API response
-    console.log('Received response from OpenAI API');
-    console.log(`Image URL: ${response.data.data[0].url}`);
-    
-    // Return the URL of the generated image
-    res.json({ url: response.data.data[0].url });
+
+    const imageUrl = response.data.data[0].url;
+    const imageResponse = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+
+    // Save the image to /public/generated folder
+    const filename = `asset_${Date.now()}.png`;
+    const filepath = path.join(__dirname, 'public', 'generated');
+
+    // Ensure directory exists
+    fs.mkdirSync(filepath, { recursive: true });
+
+    const fullPath = path.join(filepath, filename);
+    fs.writeFileSync(fullPath, imageResponse.data);
+
+    console.log(`Image saved to ${fullPath}`);
+
+    // Return both preview URL and download link
+    const publicUrl = `/public/generated/${filename}`;
+    const fullDownloadLink = `${req.protocol}://${req.get('host')}${publicUrl}`;
+
+    res.json({
+      preview: fullDownloadLink,
+      download: fullDownloadLink
+    });
   } catch (err) {
     console.error('Error generating image:', err);
     console.error('Error details:', err.response ? err.response.data : err.message);
@@ -65,7 +88,7 @@ app.post('/generate', async (req, res) => {
   }
 });
 
-// Listen on dynamic port provided by Render, default to 8080 locally
+// Start server
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
